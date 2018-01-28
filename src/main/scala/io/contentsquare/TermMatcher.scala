@@ -39,17 +39,13 @@ trait TermMatcher {
 
 private[this] sealed trait CharNode extends TermMatcher {
   def currentChar: Char
-
-  def getWords(numberOfWord: Int): Seq[String]
 }
 
 private[this] case class LeafNode(value: Char) extends CharNode {
   override def currentChar: Char = value
 
-  override def getWords(numberOfWord: Int): Seq[String] = if (numberOfWord > 0) List(s"$value") else Nil
-
   override def apply(term: String, numberOfWord: Int): Seq[String] = {
-    if (term.isEmpty && numberOfWord > 0) getWords(numberOfWord)
+    if (term.isEmpty && numberOfWord > 0) List(s"$value")
     else Nil
   }
 }
@@ -58,42 +54,42 @@ private[this] case class BranchNode(current: LeafNode, next: Map[Char, CharNode]
 
   override def currentChar: Char = current.currentChar
 
-  override def getWords(numberOfWord: Int): Seq[String] = {
-    val firstWords = next.keys.toSeq.sorted.take(numberOfWord)
-    val (list, _) = firstWords.foldLeft[(Seq[String], Int)]((Nil, numberOfWord)) { case ((listOfWords, nw), c) =>
-
-      if (nw > 0) {
-        val r = next(c).getWords(nw)
-        (listOfWords ++ r.sortBy(_.toLowerCase).take(nw), nw - r.length)
-      } else {
-        (listOfWords, 0)
-      }
+  private def getWords(numberOfWord: Int): Seq[String] = {
+    val firstChars = next.keys.toSeq.sorted.take(numberOfWord)
+    val (list, _) = firstChars.foldLeft[(Seq[String], Int)]((Nil, numberOfWord)) { case ((words, nw), c) =>
+      val r = next(c).apply("", nw)
+      (words ++ r, nw - r.length)
     }
-    list.map(w => current.value + w)
+    list
   }
 
   private def subApply(head: Char, tail: String, numberOfWord: Int): Seq[String] = {
-    val nw = if (isWord) numberOfWord - 1 else numberOfWord
-    next.get(head)
-      .map(_.apply(tail, nw))
-      .getOrElse(Nil)
-      .map(w => current.value + w)
+    def op(c: Char) = {
+      next.get(c)
+        .map(_.apply(tail, numberOfWord))
+        .getOrElse(Nil)
+    }
+
+    val lowerValue = op(head.toLower)
+    val upperValue = op(head.toUpper)
+    (lowerValue ++ upperValue).sortBy(_.toLowerCase).take(numberOfWord)
   }
 
   def apply(term: String, numberOfWord: Int): Seq[String] = {
+
     if (numberOfWord > 0) {
+      val nw = if (isWord) numberOfWord - 1 else numberOfWord
+
       val words = {
         if (term.nonEmpty) {
-          val head = term.head
-          val tail = term.tail
-          subApply(head.toLower, tail, numberOfWord) ++ subApply(head.toUpper, tail, numberOfWord)
+          subApply(term.head, term.tail, nw)
         } else {
-          getWords(numberOfWord)
+          getWords(nw)
         }
       }
 
-      if (isWord) s"${current.value}" +: words
-      else words
+      if (isWord) s"${current.value}" +: words.map(w => current.value + w)
+      else words.map(w => current.value + w)
     } else {
       Nil
     }
@@ -103,18 +99,19 @@ private[this] case class BranchNode(current: LeafNode, next: Map[Char, CharNode]
 private[this] case class RootTermMatcher(next: Map[Char, CharNode]) extends TermMatcher {
 
   private def subApply(head: Char, tail: String, numberOfWord: Int): Seq[String] = {
-    next.get(head)
-      .map(_.apply(tail, numberOfWord))
-      .getOrElse(Nil)
+    def op(c: Char) = {
+      next.get(c)
+        .map(_.apply(tail, numberOfWord))
+        .getOrElse(Nil)
+    }
+    val lowerValue = op(head.toLower)
+    val upperValue = op(head.toUpper)
+    (lowerValue ++ upperValue).sortBy(_.toLowerCase).take(numberOfWord)
   }
 
   def apply(term: String, numberOfWord: Int): Seq[String] = {
     if (term.nonEmpty) {
-      val head = term.head
-      val tail = term.tail
-      (subApply(head.toLower, tail, numberOfWord) ++ subApply(head.toUpper, tail, numberOfWord))
-        .sortBy(_.toLowerCase)
-        .toList
+      subApply(term.head, term.tail, numberOfWord)
     } else {
       Nil
     }
